@@ -36,6 +36,13 @@ public class EnergyOptimizationController {
 
     @PostMapping("/optimize-energy")
     public ResponseEntity<OptimizationResponse> optimizeEnergy(@Valid @RequestBody ScenarioRequest request) {
+        if (request.getHours() == null || request.getHours().size() != 24) {
+            throw new IllegalArgumentException("Semantically invalid request: hours list must contain exactly 24 entries.");
+        }
+        if (request.getBattery() != null && request.getBattery().getCapacity_kwh() < request.getBattery().getMinimum_energy_kwh()) {
+            throw new IllegalArgumentException("Semantically invalid request: battery capacity cannot be less than minimum energy reserve.");
+        }
+
         // Step 1: Interpret operator notes via LLM
         List<DirectiveInterpretation> rawDirectives = llmInterpreterService.interpretNotes(request.getOperator_notes());
 
