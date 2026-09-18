@@ -1,0 +1,18 @@
+version: '3.8'
+
+services:
+  gridwise-llm-service:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: gridwise-llm-service
+    ports:
+      - "${PORT:-8080}:8080"
+    environment:
+      - PORT=8080
+      - LLM_PROVIDER=${LLM_PROVIDER:-gemini}
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - REDIS_HOST=${REDIS_HOST:-localhost}
+      - REDIS_PORT=${REDIS_PORT:-6379}
+    restart: unless-stopped

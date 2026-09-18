@@ -1,6 +1,26 @@
+# Secrets
 .env
 *.env
+*.key
+
+# Build and Target directories
+target/
+*.jar
+*.war
+*.ear
+*.class
+
+# Python virtual environment and cache
 venv/
+.venv/
 __pycache__/
-*.pdf
-*.json
+*.pyc
+
+# IDE and OS files
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
+# Log files
+*.log

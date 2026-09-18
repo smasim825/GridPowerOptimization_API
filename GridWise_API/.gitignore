@@ -1,0 +1,15 @@
+# Environments
+venv/
+env/
+.env
+.venv
+
+# Python artifacts
+__pycache__/
+*.py[cod]
+*$py.class
+
+# IDE / OS files
+.vscode/
+.idea/
+.DS_Store
