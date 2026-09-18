@@ -12,8 +12,8 @@ def health_check():
 @app.post("/optimize-energy", response_model=OptimizeResponse)
 def optimize_energy(request: OptimizeRequest):
     try:
-        # 1. Interpret Notes using LLM
-        directives = interpret_operator_notes(request.operator_notes)
+        # 1. Interpret Notes using LLM with battery context
+        directives = interpret_operator_notes(request.operator_notes, request.battery)
         
         # 2. Optimize Schedule using PuLP
         hourly_plan, total_grid, total_cost, peak_grid = optimize_schedule(request, directives)

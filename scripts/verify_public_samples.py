@@ -1,36 +1,56 @@
 import json
+import os
+import sys
 import urllib.request
 import urllib.error
-import sys
-import time
 
-def run_tests(base_url):
-    print(f"Connecting to service at {base_url}...")
-    
-    # 1. Test /health
+def http_post_json(url, data_dict, timeout=30):
+    data_bytes = json.dumps(data_dict).encode("utf-8")
+    req = urllib.request.Request(
+        url,
+        data=data_bytes,
+        headers={"Content-Type": "application/json"}
+    )
     try:
-        health_req = urllib.request.Request(f"{base_url}/health", headers={"User-Agent": "Verifier/1.0"})
-        with urllib.request.urlopen(health_req, timeout=5) as response:
-            status_code = response.getcode()
-            body = json.loads(response.read().decode('utf-8'))
-            if status_code == 200 and body.get("status") == "ok":
-                print("✅ /health check PASSED: status = ok")
-            else:
-                print(f"❌ /health check FAILED: status_code={status_code}, body={body}")
-                return False
+        with urllib.request.urlopen(req, timeout=timeout) as response:
+            return response.status, json.loads(response.read().decode("utf-8")), None
+    except urllib.error.HTTPError as e:
+        err_msg = e.read().decode("utf-8") if e.fp else str(e)
+        return e.code, None, err_msg
     except Exception as e:
-        print(f"❌ /health check FAILED with exception: {e}")
+        return 0, None, str(e)
+
+def http_get_json(url, timeout=5):
+    req = urllib.request.Request(url)
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as response:
+            return response.status, json.loads(response.read().decode("utf-8")), None
+    except urllib.error.HTTPError as e:
+        err_msg = e.read().decode("utf-8") if e.fp else str(e)
+        return e.code, None, err_msg
+    except Exception as e:
+        return 0, None, str(e)
+
+def test_api(base_url="http://localhost:8080"):
+    print(f"Testing GridWise Optimization API at {base_url} ...\n")
+    
+    # 1. Health check
+    status, health_json, err = http_get_json(f"{base_url}/health", timeout=5)
+    if status == 200 and health_json and health_json.get("status") == "ok":
+        print(f"✅ GET {base_url}/health: Status OK")
+    else:
+        print(f"❌ Health check failed: status {status}, error: {err}")
         return False
 
-    # 2. Test 10 Public Sample Cases
+    # 2. Locate sample cases JSON
     candidate_paths = [
+        "pdfs/BUP_CSE_FEST_2026_Preli_Public_Sample_Cases.json",
         "BUP_CSE_FEST_2026_Preli_Public_Sample_Cases.json",
-        "../BUP_CSE_FEST_2026_Preli_Public_Sample_Cases.json",
-        "/Users/nabil/Downloads/BUP_CSE_FEST_2026_Participant_Docs 2/BUP_CSE_FEST_2026_Preli_Public_Sample_Cases.json"
+        "../pdfs/BUP_CSE_FEST_2026_Preli_Public_Sample_Cases.json",
+        "../BUP_CSE_FEST_2026_Preli_Public_Sample_Cases.json"
     ]
     sample_file = None
     data = None
-    import os
     for path in candidate_paths:
         if os.path.exists(path):
             sample_file = path
@@ -42,63 +62,73 @@ def run_tests(base_url):
                 pass
 
     if not data:
-        print(f"❌ Failed to locate or load BUP_CSE_FEST_2026_Preli_Public_Sample_Cases.json")
+        print("❌ Sample cases JSON not found!")
         return False
 
     cases = data.get("cases", [])
     print(f"\nEvaluating {len(cases)} public sample cases against POST {base_url}/optimize-energy ...\n")
 
-    passed_count = 0
-
+    passed = 0
     for idx, case in enumerate(cases):
         scenario_id = case["input"]["scenario_id"]
-        req_payload = json.dumps(case["input"]).encode('utf-8')
+        status_code, result, err_text = http_post_json(f"{base_url}/optimize-energy", case["input"], timeout=30)
         
-        req = urllib.request.Request(
-            f"{base_url}/optimize-energy",
-            data=req_payload,
-            headers={"Content-Type": "application/json", "User-Agent": "Verifier/1.0"},
-            method="POST"
-        )
-        
-        start_time = time.time()
-        try:
-            with urllib.request.urlopen(req, timeout=30) as resp:
-                elapsed_ms = (time.time() - start_time) * 1000
-                res_code = resp.getcode()
-                res_body = json.loads(resp.read().decode('utf-8'))
-                
-                # Validation checks
-                if res_code != 200:
-                    print(f"[{idx+1}/{len(cases)}] Case {scenario_id}: ❌ HTTP {res_code}")
-                    continue
-                    
-                calc_cost = res_body.get("total_cost_bdt", -1)
-                ref_cost = case["expected_output"]["total_cost_bdt"]
-                diff = abs(calc_cost - ref_cost)
-                
-                directives = res_body.get("directive_interpretation", [])
-                hourly_plan = res_body.get("hourly_plan", [])
-                
-                if len(hourly_plan) != 24:
-                    print(f"[{idx+1}/{len(cases)}] Case {scenario_id}: ❌ hourly_plan length != 24 ({len(hourly_plan)})")
-                    continue
-                    
-                if diff <= 1.0: # Allow small numeric tolerance
-                    print(f"[{idx+1}/{len(cases)}] Case {scenario_id}: ✅ PASSED in {elapsed_ms:.1f}ms | Calc Cost: {calc_cost:.2f} BDT | Ref Cost: {ref_cost:.2f} BDT (Diff: {diff:.2f})")
-                    passed_count += 1
-                else:
-                    print(f"[{idx+1}/{len(cases)}] Case {scenario_id}: ⚠️ Cost Discrepancy in {elapsed_ms:.1f}ms | Calc Cost: {calc_cost:.2f} BDT | Ref Cost: {ref_cost:.2f} BDT (Diff: {diff:.2f})")
-        except Exception as e:
-            print(f"[{idx+1}/{len(cases)}] Case {scenario_id}: ❌ Exception: {e}")
+        if status_code != 200 or not result:
+            print(f"[{idx+1}/{len(cases)}] {scenario_id}: ❌ HTTP {status_code} - {err_text}")
+            continue
 
-    print(f"\n==========================================")
-    print(f"SUMMARY: {passed_count}/{len(cases)} public sample cases passed.")
-    print(f"==========================================")
-    return passed_count == len(cases)
+        calc_cost = result.get("total_cost_bdt", -1)
+        ref_cost = case["expected_output"]["total_cost_bdt"]
+        diff = abs(calc_cost - ref_cost)
+
+        # Validate hourly plan
+        plan = result.get("hourly_plan", [])
+        if len(plan) != 24:
+            print(f"[{idx+1}/{len(cases)}] {scenario_id}: ❌ Invalid hourly_plan length: {len(plan)}")
+            continue
+
+        # Validate energy balance
+        balance_ok = True
+        for h in range(24):
+            req_h = case["input"]["hours"][h]
+            res_h = plan[h]
+            grid = res_h["grid_kwh"]
+            solar = res_h["solar_used_kwh"]
+            action = res_h["battery_action"]
+            bat_kwh = res_h["battery_kwh"]
+            discharge = bat_kwh if action == "discharge" else 0.0
+            charge = bat_kwh if action == "charge" else 0.0
+            
+            lhs = grid + solar + discharge
+            rhs = req_h["demand_kwh"] + charge
+            if abs(lhs - rhs) > 0.1:
+                balance_ok = False
+                break
+
+        if not balance_ok:
+            print(f"[{idx+1}/{len(cases)}] {scenario_id}: ❌ Energy balance constraint violated in hourly_plan")
+            continue
+
+        # Validate battery neutrality
+        initial_bat = case["input"]["battery"]["initial_energy_kwh"]
+        final_bat = plan[23]["battery_energy_after_kwh"]
+        if abs(initial_bat - final_bat) > 0.1:
+            print(f"[{idx+1}/{len(cases)}] {scenario_id}: ❌ End-of-day battery neutrality failed (initial={initial_bat}, final={final_bat})")
+            continue
+
+        if diff <= 1.0:
+            print(f"[{idx+1}/{len(cases)}] {scenario_id}: ✅ PASSED | Cost: {calc_cost:.2f} BDT | Ref: {ref_cost:.2f} BDT (Diff: {diff:.2f})")
+            passed += 1
+        else:
+            print(f"[{idx+1}/{len(cases)}] {scenario_id}: ⚠️ Cost difference | Cost: {calc_cost:.2f} BDT | Ref: {ref_cost:.2f} BDT (Diff: {diff:.2f})")
+
+    print("\n" + "="*45)
+    print(f"SUMMARY: {passed}/{len(cases)} sample cases passed successfully.")
+    print("="*45)
+    return passed == len(cases)
 
 if __name__ == "__main__":
     url = "http://localhost:8080"
-    if len(sys.argv) > 2 and sys.argv[1] == "--url":
-        url = sys.argv[2]
-    run_tests(url)
+    if len(sys.argv) > 1:
+        url = sys.argv[1]
+    test_api(url)

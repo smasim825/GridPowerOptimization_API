@@ -39,6 +39,10 @@ public class LlmInterpreterService {
     private String llmProvider;
 
     public List<DirectiveInterpretation> interpretNotes(List<String> operatorNotes) {
+        return interpretNotes(operatorNotes, null);
+    }
+
+    public List<DirectiveInterpretation> interpretNotes(List<String> operatorNotes, com.bup.gridwise.dto.request.BatteryConfig battery) {
         List<DirectiveInterpretation> results = new ArrayList<>();
         if (operatorNotes == null || operatorNotes.isEmpty()) {
             return results;
@@ -49,7 +53,7 @@ public class LlmInterpreterService {
 
         if (hasApiKey) {
             try {
-                results = callLlmApi(operatorNotes);
+                results = callLlmApi(operatorNotes, battery);
                 if (results != null && results.size() == operatorNotes.size()) {
                     return results;
                 }
@@ -58,11 +62,11 @@ public class LlmInterpreterService {
             }
         }
 
-        return fallbackPatternExtraction(operatorNotes);
+        return fallbackPatternExtraction(operatorNotes, battery);
     }
 
-    private List<DirectiveInterpretation> callLlmApi(List<String> operatorNotes) throws Exception {
-        String prompt = buildPrompt(operatorNotes);
+    private List<DirectiveInterpretation> callLlmApi(List<String> operatorNotes, com.bup.gridwise.dto.request.BatteryConfig battery) throws Exception {
+        String prompt = buildPrompt(operatorNotes, battery);
 
         if ("openai".equalsIgnoreCase(llmProvider) && openAiApiKey != null && !openAiApiKey.isBlank()) {
             return callOpenAiApi(prompt, operatorNotes.size());
@@ -70,23 +74,29 @@ public class LlmInterpreterService {
             return callGeminiApi(prompt, operatorNotes.size());
         }
 
-        return fallbackPatternExtraction(operatorNotes);
+        return fallbackPatternExtraction(operatorNotes, battery);
     }
 
-    private String buildPrompt(List<String> notes) {
+    private String buildPrompt(List<String> notes, com.bup.gridwise.dto.request.BatteryConfig battery) {
         StringBuilder sb = new StringBuilder();
         sb.append("You are an expert energy management directive extractor.\n");
         sb.append("Extract structured directives from campus operator notes for a 24-hour schedule (hours 0 to 23).\n\n");
+        if (battery != null) {
+            sb.append("Battery Specifications:\n");
+            sb.append(String.format("- capacity_kwh: %.1f\n- initial_energy_kwh: %.1f\n- minimum_energy_kwh: %.1f\n- max_charge_kwh_per_hour: %.1f\n- max_discharge_kwh_per_hour: %.1f\n\n",
+                    battery.getCapacity_kwh(), battery.getInitial_energy_kwh(), battery.getMinimum_energy_kwh(),
+                    battery.getMax_charge_kwh_per_hour(), battery.getMax_discharge_kwh_per_hour()));
+        }
         sb.append("Allowed Directive Types:\n");
-        sb.append("1. solar_reduction: {\"hours\": [...], \"factor\": number} (factor is remaining usable solar fraction, e.g. 20% output = 0.2, 50% drop = 0.5)\n");
-        sb.append("2. minimum_battery_reserve: {\"hours\": [...], \"minimum_energy_kwh\": number}\n");
+        sb.append("1. solar_reduction: {\"hours\": [...], \"factor\": number} (factor is remaining usable solar fraction, e.g. 80% reduction means factor=0.2, 25% usable means factor=0.25, half means factor=0.5)\n");
+        sb.append("2. minimum_battery_reserve: {\"hours\": [...], \"minimum_energy_kwh\": number} (If specified as percentage, calculate minimum_energy_kwh = percentage * battery capacity_kwh)\n");
         sb.append("3. no_charge_window: {\"hours\": [...]}\n");
         sb.append("4. no_discharge_window: {\"hours\": [...]}\n");
         sb.append("5. max_grid_window: {\"hours\": [...], \"max_grid_kwh\": number}\n");
         sb.append("6. no_op: applies: false, structured_adjustment: null\n\n");
         sb.append("Time mapping rules:\n");
-        sb.append("- Hours are 0..23, start-inclusive, end-exclusive. E.g. 1 PM to 3 PM = [13, 14], 2 PM to 4 PM = [14, 15], 6 PM to 9 PM = [18, 19, 20].\n");
-        sb.append("- Irrelevant notes (e.g. cafeteria, weather chatter with no schedule impact) must output directive_type: 'no_op', applies: false, structured_adjustment: null.\n\n");
+        sb.append("- Hours are 0..23, start-inclusive, end-exclusive. E.g. noon to 2 PM = [12, 13], 1 PM to 3 PM = [13, 14], 2 PM to 4 PM = [14, 15], 6 PM to 9 PM = [18, 19, 20], 6 PM to 10 PM = [18, 19, 20, 21].\n");
+        sb.append("- Irrelevant notes (e.g. cafeteria, library notices, sports registration, seminar moved) must output directive_type: 'no_op', applies: false, structured_adjustment: null.\n\n");
         sb.append("Operator Notes:\n");
         for (int i = 0; i < notes.size(); i++) {
             sb.append("Note ").append(i).append(": \"").append(notes.get(i)).append("\"\n");
@@ -173,17 +183,21 @@ public class LlmInterpreterService {
     }
 
     public List<DirectiveInterpretation> fallbackPatternExtraction(List<String> operatorNotes) {
+        return fallbackPatternExtraction(operatorNotes, null);
+    }
+
+    public List<DirectiveInterpretation> fallbackPatternExtraction(List<String> operatorNotes, com.bup.gridwise.dto.request.BatteryConfig battery) {
         List<DirectiveInterpretation> list = new ArrayList<>();
 
         for (int i = 0; i < operatorNotes.size(); i++) {
             String note = operatorNotes.get(i).trim();
-            DirectiveInterpretation di = extractFromPattern(i, note);
+            DirectiveInterpretation di = extractFromPattern(i, note, battery);
             list.add(di);
         }
         return list;
     }
 
-    private DirectiveInterpretation extractFromPattern(int index, String note) {
+    private DirectiveInterpretation extractFromPattern(int index, String note, com.bup.gridwise.dto.request.BatteryConfig battery) {
         String lower = note.toLowerCase();
 
         // Check for distractor / non-actionable notes
@@ -202,9 +216,9 @@ public class LlmInterpreterService {
         }
 
         // 2. Minimum Battery Reserve
-        if (lower.contains("reserve") || lower.contains("keep at least") || lower.contains("minimum battery") || lower.contains("remain in the battery") || lower.contains("hold at least")) {
+        if (lower.contains("reserve") || lower.contains("keep at least") || lower.contains("minimum battery") || lower.contains("remain in the battery") || lower.contains("hold at least") || lower.contains("battery capacity stored")) {
             List<Integer> hrs = parseHoursFromText(lower);
-            double reqMin = parseReserveFromText(lower);
+            double reqMin = parseReserveFromText(lower, battery);
             if (!hrs.isEmpty() && reqMin > 0) {
                 StructuredAdjustment adj = new StructuredAdjustment(hrs, null, reqMin, null);
                 return new DirectiveInterpretation(index, true, DirectiveType.minimum_battery_reserve, adj, "Extracted minimum battery reserve.");
@@ -231,7 +245,7 @@ public class LlmInterpreterService {
         }
 
         // 5. Max Grid Window
-        if (lower.contains("grid import") || lower.contains("grid intake") || lower.contains("max grid") || lower.contains("grid limit") || lower.contains("grid cap") || lower.contains("transformer limit") || lower.contains("must not exceed") || lower.contains("at or below") || lower.contains("cap grid")) {
+        if (lower.contains("grid import") || lower.contains("grid intake") || lower.contains("max grid") || lower.contains("grid limit") || lower.contains("grid cap") || lower.contains("transformer limit") || lower.contains("must not exceed") || lower.contains("at or below") || lower.contains("stay at or below") || lower.contains("cap grid")) {
             List<Integer> hrs = parseHoursFromText(lower);
             double maxGrid = parseMaxGridFromText(lower);
             if (!hrs.isEmpty() && maxGrid > 0) {
@@ -246,15 +260,14 @@ public class LlmInterpreterService {
 
     private boolean isDistractorNote(String text) {
         if (text.contains("solar") || text.contains("pv") || text.contains("panel") ||
-            text.contains("battery") || text.contains("reserve") || text.contains("charge") ||
-            text.contains("discharge") || text.contains("grid") || text.contains("kwh") ||
-            text.contains("transformer")) {
+            text.contains("battery") || text.contains("reserve") || text.contains("charg") ||
+            text.contains("discharg") || text.contains("grid") || text.contains("kwh") ||
+            text.contains("transformer") || text.contains("feeder") || text.contains("inverter") ||
+            text.contains("substation")) {
             return false;
         }
 
-        return text.contains("cafeteria") || text.contains("menu") || text.contains("weather") ||
-               text.contains("meeting") || text.contains("holiday") || text.contains("parking") ||
-               text.contains("shuttle") || text.contains("sports office");
+        return true;
     }
 
     private List<Integer> parseHoursFromText(String text) {
@@ -328,9 +341,15 @@ public class LlmInterpreterService {
         return 0.2;
     }
 
-    private double parseReserveFromText(String text) {
-        if (text.contains("50% of the battery capacity") || text.contains("50%")) {
-            return 100.0;
+    private double parseReserveFromText(String text, com.bup.gridwise.dto.request.BatteryConfig battery) {
+        Pattern pPct = Pattern.compile("(\\d+)%\\s*(?:of\\s*(?:the)?\\s*battery\\s*capacity)?", Pattern.CASE_INSENSITIVE);
+        Matcher mPct = pPct.matcher(text);
+        if (mPct.find()) {
+            double pct = Double.parseDouble(mPct.group(1)) / 100.0;
+            if (battery != null && battery.getCapacity_kwh() > 0) {
+                return pct * battery.getCapacity_kwh();
+            }
+            return pct * 200.0; // standard default fallback
         }
 
         Pattern p = Pattern.compile("(?:at least|minimum|keep|requires|hold|reserve)\\s+(\\d+(?:\\.\\d+)?)\\s*(?:kwh)?", Pattern.CASE_INSENSITIVE);

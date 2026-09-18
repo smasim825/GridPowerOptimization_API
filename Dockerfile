@@ -1,5 +1,5 @@
 # Stage 1: Build the Maven application
-FROM maven:3.9.6-eclipse-temurin-21-alpine AS build
+FROM maven:3.9-eclipse-temurin-17 AS build
 WORKDIR /app
 
 # Copy pom.xml and dependencies first for optimal docker caching
@@ -11,7 +11,7 @@ COPY src ./src
 RUN mvn clean package -DskipTests
 
 # Stage 2: Create lightweight runtime container
-FROM eclipse-temurin:21-jre-alpine
+FROM eclipse-temurin:17-jre-jammy
 WORKDIR /app
 
 # Expose HTTP port (default 8080)
