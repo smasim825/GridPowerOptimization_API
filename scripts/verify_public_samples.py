@@ -23,12 +23,26 @@ def run_tests(base_url):
         return False
 
     # 2. Test 10 Public Sample Cases
-    sample_file = "BUP_CSE_FEST_2026_Preli_Public_Sample_Cases.json"
-    try:
-        with open(sample_file, "r", encoding="utf-8") as f:
-            data = json.load(f)
-    except Exception as e:
-        print(f"❌ Failed to load {sample_file}: {e}")
+    candidate_paths = [
+        "BUP_CSE_FEST_2026_Preli_Public_Sample_Cases.json",
+        "../BUP_CSE_FEST_2026_Preli_Public_Sample_Cases.json",
+        "/Users/nabil/Downloads/BUP_CSE_FEST_2026_Participant_Docs 2/BUP_CSE_FEST_2026_Preli_Public_Sample_Cases.json"
+    ]
+    sample_file = None
+    data = None
+    import os
+    for path in candidate_paths:
+        if os.path.exists(path):
+            sample_file = path
+            try:
+                with open(sample_file, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                break
+            except Exception:
+                pass
+
+    if not data:
+        print(f"❌ Failed to locate or load BUP_CSE_FEST_2026_Preli_Public_Sample_Cases.json")
         return False
 
     cases = data.get("cases", [])
