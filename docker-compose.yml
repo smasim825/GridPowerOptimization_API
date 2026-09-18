@@ -7,12 +7,13 @@ services:
       dockerfile: Dockerfile
     container_name: gridwise-llm-service
     ports:
-      - "${PORT:-8080}:8080"
+      - "${PORT:-9090}:8080"
     environment:
       - PORT=8080
       - LLM_PROVIDER=${LLM_PROVIDER:-gemini}
-      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-AQ.Ab8RN6L5nh5ds7HZFd0pw8fj72j7kxdz1tiR_wYEp46d2wm0CA}
       - OPENAI_API_KEY=${OPENAI_API_KEY:-}
       - REDIS_HOST=${REDIS_HOST:-localhost}
       - REDIS_PORT=${REDIS_PORT:-6379}
     restart: unless-stopped
+
