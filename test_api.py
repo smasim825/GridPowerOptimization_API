@@ -1,8 +1,11 @@
 import json
 import os
 import sys
+import ssl
 import urllib.request
 import urllib.error
+
+ssl_ctx = ssl._create_unverified_context()
 
 def http_post_json(url, data_dict, timeout=30):
     data_bytes = json.dumps(data_dict).encode("utf-8")
@@ -12,7 +15,7 @@ def http_post_json(url, data_dict, timeout=30):
         headers={"Content-Type": "application/json"}
     )
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as response:
+        with urllib.request.urlopen(req, timeout=timeout, context=ssl_ctx) as response:
             return response.status, json.loads(response.read().decode("utf-8")), None
     except urllib.error.HTTPError as e:
         err_msg = e.read().decode("utf-8") if e.fp else str(e)
@@ -23,7 +26,7 @@ def http_post_json(url, data_dict, timeout=30):
 def http_get_json(url, timeout=5):
     req = urllib.request.Request(url)
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as response:
+        with urllib.request.urlopen(req, timeout=timeout, context=ssl_ctx) as response:
             return response.status, json.loads(response.read().decode("utf-8")), None
     except urllib.error.HTTPError as e:
         err_msg = e.read().decode("utf-8") if e.fp else str(e)
